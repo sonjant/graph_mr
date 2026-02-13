@@ -1,0 +1,11 @@
+{
+  "root": "/path/to/graph_mr_github",
+  "genotype_dir": "/path/to/plink/merged",
+  "vcf_dir": "/path/to/vcf",
+  "dataset": "proteomics",
+  "method_types": "cftlmr,cfmr",
+  "run_preprocess": false,
+  "exposure_matrix": "",
+  "covariate_file": "",
+  "exposure_metadata": ""
+}
