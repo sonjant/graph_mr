@@ -99,4 +99,4 @@ Use a params file: `nextflow run nextflow/main.nf -c nextflow/nextflow.config -p
 
 ## Licence and citation
 
-See repository licence and paper for citation.
+Unless otherwise indicated, its contents are licensed under an Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
