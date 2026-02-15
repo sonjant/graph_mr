@@ -2,7 +2,7 @@
 
 | | |
 |--|--|
-| Mendelian randomization pipeline for multi-omics (e.g. proteomics, metabolomics, transcriptomics) with cross-fitting and optional transfer learning. **Plug-and-play**: you need **genotype data** and **one post-genotype omic dataset**; no study-specific names (e.g. no "airwave" or "tripleintersection") are hardcoded. Suitable for HPC clusters using PBS; also runnable via Nextflow. | <img src="docs/Colourful-Gradient.svg" alt="Graph MR logo" width="200" /><br><em>Logo by <a href="https://chiaweiting.cargo.site/About">Wei-Ting Chia</a>.</em> |
+| Mendelian randomization pipeline for multi-omics (e.g. proteomics, metabolomics, transcriptomics) with cross-fitting and optional transfer learning. **Plug-and-play**: you need **genotype data** and **one post-genotype omic dataset**; no study-specific names (e.g. no "airwave" or "tripleintersection") are hardcoded. Suitable for HPC clusters using PBS; also runnable via Nextflow. | <img src="docs/Colourful-Gradient.svg" alt="Graph MR logo" width="600" /><br><em>Logo by <a href="https://chiaweiting.cargo.site/About">Wei-Ting Chia</a>.</em> |
 
 ## Plug-and-play: what you need
 
