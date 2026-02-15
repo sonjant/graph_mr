@@ -1,5 +1,8 @@
 # Graph MR pipeline
 
+![Graph MR logo](docs/Colourful-Gradient.svg)  
+*Logo by [Wei-Ting Chia](https://chiaweiting.cargo.site/About).*
+
 Mendelian randomization pipeline for multi-omics (e.g. proteomics, metabolomics, transcriptomics) with cross-fitting and optional transfer learning. **Plug-and-play**: you need **genotype data** and **one post-genotype omic dataset**; no study-specific names (e.g. no "airwave" or "tripleintersection") are hardcoded. Suitable for HPC clusters using PBS; also runnable via Nextflow.
 
 ## Plug-and-play: what you need
