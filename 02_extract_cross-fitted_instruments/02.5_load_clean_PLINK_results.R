@@ -54,6 +54,75 @@ output_dirs <- sapply(method_types_list, function(mt) {
   paste0(results_dir, mt, "_", input_type, "/instruments/")
 })
 
+# Protein cis window, matching script 02.6: hg19 gene body ± 500 kb.
+# Non-protein exposures keep the genome-wide clumped set.
+olink_csv <- paste0(annotation_dir, "OlinkProteomics/olink-explore-3072-assay-list-2024-03-19.csv")
+protein_names <- if (file.exists(olink_csv)) {
+  vroom(olink_csv) %>%
+    dplyr::rename(UniProt = "UniProt ID", protein_name = "Protein name") %>%
+    dplyr::select(UniProt, protein_name)
+} else {
+  data.frame(UniProt = character(), protein_name = character())
+}
+protein38_path <- paste0(annotation_dir, "OlinkProteomics/proteinID_hg38_coordinates.txt")
+protein38coords <- if (file.exists(protein38_path)) {
+  vroom(protein38_path, col_names = c("UniProtID", "hg38chr", "hg38start", "hg38end")) %>%
+    distinct(.)
+} else {
+  data.frame(UniProtID = character(), hg38chr = integer(), hg38start = integer(), hg38end = integer())
+}
+bed_path <- paste0(annotation_dir, "OlinkProteomics/protein_coords_hg19_hg38.bed")
+protein_19_38_coords <- if (file.exists(bed_path)) {
+  vroom(bed_path, col_names = c("hg19chr", "hg19start", "hg19end", "hg38chr_start_end", "rm")) %>%
+    dplyr::select("hg19chr", "hg19start", "hg19end", "hg38chr_start_end") %>%
+    dplyr::mutate(hg19chr = str_remove(hg19chr, "^chr")) %>%
+    tidyr::separate(hg38chr_start_end, into = c("hg38chr", "pos"), sep = ":") %>%
+    tidyr::separate(pos, into = c("hg38start", "hg38end"), sep = "-") %>%
+    dplyr::mutate(hg38chr = str_remove(hg38chr, "^chr"),
+                  hg38chr = as.integer(hg38chr),
+                  hg38start = as.integer(hg38start),
+                  hg38end = as.integer(hg38end),
+                  hg19chr = as.integer(hg19chr)) %>%
+    distinct(.)
+} else {
+  data.frame(hg19chr = integer(), hg19start = integer(), hg19end = integer(), hg38chr = integer(), hg38start = integer(), hg38end = integer())
+}
+
+merged_protein_coords <- dplyr::inner_join(protein_19_38_coords, protein38coords, by = c("hg38chr", "hg38start", "hg38end")) %>%
+  dplyr::mutate(hg19_length = hg19end - hg19start) %>%
+  dplyr::group_by(UniProtID) %>%
+  dplyr::slice_max(order_by = hg19_length, n = 1, with_ties = F) %>%
+  dplyr::ungroup()
+
+is_protein <- input_i %in% protein_names$UniProt
+cis_window <- merged_protein_coords %>%
+  dplyr::filter(UniProtID == input_i) %>%
+  dplyr::mutate(hg19start = hg19start - 500000,
+                hg19end = hg19end + 500000)
+has_cis_coords <- is_protein && nrow(cis_window) == 1
+
+empty_instruments <- function() {
+  data.frame(ID = character(),
+             CHROM = character(),
+             POS = integer(),
+             BETA = numeric(),
+             SE = numeric(),
+             P = numeric(),
+             REF = character(),
+             ALT = character(),
+             stringsAsFactors = FALSE)
+}
+
+# Keep clumped SNPs inside the protein cis window.
+filter_to_cis <- function(clumped_snps, cis_window) {
+  clumped_snps %>%
+    dplyr::mutate(CHROM = as.integer(str_remove(as.character(CHROM), "^chr")),
+                  POS = as.integer(POS)) %>%
+    dplyr::filter(CHROM == cis_window$hg19chr,
+                  POS >= cis_window$hg19start,
+                  POS <= cis_window$hg19end)
+}
+
 
 
 # Start script ---- ---- ---- ---- ---- ----
@@ -75,43 +144,44 @@ save_gwas <- function(input_i, nfolds = 10){
                                  use.names = T, fill = T) 
     # Filter out rows where the column "ID" contains the value "ID"
     gwas_res_fold_i <- gwas_res_fold_i[gwas_res_fold_i$ID != "ID", ]
-    # If GWAS result is empty, create a dataframe, if not, proceed with binding and saving the results
-    if (nrow(gwas_res_fold_i) == 0) {
-      # Create an empty dataframe with specified columns and save it as a file so that the number of files remains n_phenotypes * k_folds)
-      gwas_res_fold_i <- data.frame(ID = character(),
-                                    CHROM = character(),
-                                    POS = integer(),
-                                    BETA = numeric(),
-                                    SE = numeric(),
-                                    P = numeric(),
-                                    REF = character(),
-                                    ALT = character(),
-                                    stringsAsFactors = FALSE)
-      # Write to all method_type folders
-      for (output_dir in output_dirs) {
-        vroom_write(gwas_res_fold_i, col_names = T, file = paste0(output_dir, input_i, "/fold", fold_i, "_instruments.tsv"))
-      }
-      # Also create a clumped_res_fold_i object with 0 rows
-      clumped_res_fold_i <- data.frame(SNP = character())
-      } else {
-      # List, read, bind, and save the clumped results for the current exposure fold
+    n_gwas_snps <- nrow(gwas_res_fold_i)
+
+    # If GWAS result is empty, keep an empty instrument table.
+    # Otherwise join the clumped SNP IDs back to the GWAS rows.
+    if (n_gwas_snps == 0) {
+      n_clumped_snps <- 0
+      instruments_fold_i <- empty_instruments()
+      n_clumped_cis_snps <- if (is_protein) 0L else NA_integer_
+    } else {
       clumped_res_filelist <- list.files(path = paste0(input_files, input_i, "/fold", fold_i), pattern = "*.clumped.clumps", full.names = T, recursive = T)
       clumped_res_fold_i <- rbindlist(l = lapply(clumped_res_filelist, fread, select = c("ID")), use.name = T, fill = T)
       clumped_res_fold_i <- clumped_res_fold_i %>%
-        inner_join(y = gwas_res_fold_i, by = "ID") 
-      # Write to all method_type folders
-      for (output_dir in output_dirs) {
-        vroom_write(clumped_res_fold_i, col_names = T, file = paste0(output_dir, input_i, "/fold", fold_i, "_instruments.tsv"))
+        inner_join(y = gwas_res_fold_i, by = "ID")
+      n_clumped_snps <- nrow(clumped_res_fold_i)
+
+      # Proteins: save cis SNPs only. A protein with no coordinates has no cis window, so its instrument file is empty.
+      # Other exposures: save the genome-wide clumped SNPs.
+      if (has_cis_coords) {
+        instruments_fold_i <- filter_to_cis(clumped_res_fold_i, cis_window)
+        n_clumped_cis_snps <- nrow(instruments_fold_i)
+      } else if (is_protein) {
+        instruments_fold_i <- empty_instruments()
+        n_clumped_cis_snps <- 0L
+      } else {
+        instruments_fold_i <- clumped_res_fold_i
+        n_clumped_cis_snps <- NA_integer_
       }
-      }
-    # Save the number of SNPs selected by the GWAS and after clumping in a dataframe
+    }
+
+    # Write the instrument table and the SNP counts to all method_type folders
     gwas_snps_dim <- data.frame(Exposure = input_i,
                                 Fold = paste0("fold", fold_i),
-                                "n_gwas_snps" = nrow(gwas_res_fold_i),
-                                "n_clumped_snps" = nrow(clumped_res_fold_i),
+                                n_gwas_snps = n_gwas_snps,
+                                n_clumped_snps = n_clumped_snps,
+                                n_clumped_cis_snps = n_clumped_cis_snps,
                                 check.names = F)
-    # Write to all method_type folders
     for (output_dir in output_dirs) {
+      vroom_write(instruments_fold_i, col_names = T, file = paste0(output_dir, input_i, "/fold", fold_i, "_instruments.tsv"))
       vroom_write(gwas_snps_dim, col_names = T, file = paste0(output_dir, input_i, "/fold", fold_i, "_instrument_dimensions.csv"))
     }
     # Print current exposure and fold
