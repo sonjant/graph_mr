@@ -63,8 +63,8 @@ input_dosages <- input_dosages %>%
 
 # Create the GS vector for each participant with missing exposure cases
 create_gs <- function(ivbetas_x_i, missing_x_i_ids, input_dosages, standardise = TRUE) {
-  # Extract the strings of the exposure name and split number from the file extension
-  exposure_name <- strsplit(ivbetas_x_i, "/")[[1]][11]
+  # Exposure is the parent directory of the instrument file
+  exposure_name <- basename(dirname(ivbetas_x_i))
   
   # Initialize status message
   status_msg <- ""

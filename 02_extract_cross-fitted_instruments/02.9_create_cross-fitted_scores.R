@@ -46,6 +46,18 @@ input_test_ids <- list.files(path = paste0(data_dir, base_dir, "/gwas_input"), f
 fold_numbers_test_ids <- as.numeric(gsub(".*fold([0-9]+)_.*", "\\1", basename(input_test_ids)))
 input_test_ids <- input_test_ids[order(fold_numbers_test_ids)]
 
+# Exposures with 5 or fewer instrumented folds still get a score file, filled with NA.
+# 02.6 records N.empty_rows out of 10; n_folds_containing_instruments = 10 - N.empty_rows,
+# so N.empty_rows < 5 is more than 5 instrumented folds.
+empty_folds_path <- paste0(results_dir, base_dir, "/summary_stats/n_empty_folds.csv")
+if (!file.exists(empty_folds_path)) {
+  stop("Missing fold-count summary (run 02.6 first): ", empty_folds_path)
+}
+empty_folds <- vroom(empty_folds_path, delim = ",", show_col_types = FALSE)
+eligible_exposures <- empty_folds$Exposure[!is.na(empty_folds$N.empty_rows) & empty_folds$N.empty_rows < 5]
+cat("Exposures with more than 5 instrumented folds:", length(eligible_exposures), "of", nrow(empty_folds), "\n")
+cat("Exposures with 5 or fewer instrumented folds will get NA-filled scores:", nrow(empty_folds) - length(eligible_exposures), "\n")
+
 # Set the third input to the instrument dosages, which is the output from 02.8 (use primary method_type for reading)
 input_dosages <- vroom(paste0(ephemeral_dir, "results/", base_dir, "/instrument_dosages/cross_fitted_instruments/all_instrument_dosages.txt")) %>%
   as.data.frame() %>%
@@ -80,13 +92,24 @@ input_dosages <- input_dosages %>%
 
 # Create the GS vector for each exposure test fold
 create_gs <- function(ivbetas_x_i, test_ids_x_i, input_dosages, standardise = TRUE) {
-  # Extract the strings of the exposure name and split number from the file extension
-  exposure_name <- strsplit(ivbetas_x_i, "/")[[1]][11]
-  fold_i <- strsplit(ivbetas_x_i, "/")[[1]][12] 
-  fold_i <- strsplit(fold_i[1], "_")[[1]][1]
+  # Exposure is the parent directory; fold is the first field of the file name
+  exposure_name <- basename(dirname(ivbetas_x_i))
+  fold_i <- strsplit(basename(ivbetas_x_i), "_")[[1]][1]
   
   # Initialize status message
   status_msg <- ""
+
+  # 5 or fewer instrumented folds: still write the score file, with gs set to NA.
+  # Missing-case transfer-learned scores are left unchanged in 03.8.
+  if (!exposure_name %in% eligible_exposures) {
+    status_msg <- "5 or fewer instrumented folds, creating NA-filled gs ... "
+    test_ids_x_i <- vroom(test_ids_x_i, col_select = 1:2, col_names = c("barcode", "fullbarcode"), col_types = c("cc"))
+    gs <- test_ids_x_i %>%
+      dplyr::filter(barcode == -9) %>%
+      dplyr::select(fullbarcode) %>%
+      dplyr::rename(barcode = fullbarcode) %>%
+      add_column(gs = NA)
+  } else {
 
   # Read IV betas 
   ivbetas_x_i <- vroom(ivbetas_x_i, delim = "\t", col_types = cols(REF = col_character(), ALT = col_character())) %>%
@@ -167,6 +190,7 @@ create_gs <- function(ivbetas_x_i, test_ids_x_i, input_dosages, standardise = TR
           dplyr::select(barcode, gs)
       }
     }
+  }
   }
   
   # Create result directories for this exposure's genetic risk scores in all method_type folders

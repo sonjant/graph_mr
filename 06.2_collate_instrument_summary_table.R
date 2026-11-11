@@ -63,13 +63,31 @@ process_files_in_batches <- function(input_path, pattern, batch_size) {
 # Summarise SNP dimension stats for each exposure (X) (output from 02.5)
 summarised_data <- process_files_in_batches(input_path = input_dims, pattern = "fold[0-9]+_instrument_dimensions\\.csv$", batch_size = 500)
 
+# Older dimension files have no cis count. Keep the summary column and leave it missing.
+if (!"n_clumped_cis_snps" %in% colnames(summarised_data)) {
+  summarised_data$n_clumped_cis_snps <- NA_real_
+}
+
+summarise_count <- function(x) {
+  if (all(is.na(x))) NA_real_ else mean(x, na.rm = TRUE)
+}
+summarise_sd <- function(x) {
+  if (sum(!is.na(x)) < 2) NA_real_ else sd(x, na.rm = TRUE)
+}
+summarise_median <- function(x) {
+  if (all(is.na(x))) NA_real_ else median(x, na.rm = TRUE)
+}
+
 summarised_data <- summarised_data %>%
   dplyr::group_by(Exposure) %>%
   dplyr::summarise(
     mean_n_gwas_snps = mean(n_gwas_snps, na.rm = TRUE),
     sd_n_gwas_snps = sd(n_gwas_snps, na.rm = TRUE),
     median_n_gwas_snps = median(n_gwas_snps, na.rm = TRUE),
-    mean_n_clumped_snps = mean(n_clumped_snps, na.rm = TRUE))
+    mean_n_clumped_snps = mean(n_clumped_snps, na.rm = TRUE),
+    mean_n_clumped_cis_snps = summarise_count(n_clumped_cis_snps),
+    sd_n_clumped_cis_snps = summarise_sd(n_clumped_cis_snps),
+    median_n_clumped_cis_snps = summarise_median(n_clumped_cis_snps))
 
 # Read the n_empty_folds file and group the stats by Exposure (output from 02.6)
 emptyfolds <- vroom(paste0(output, "n_empty_folds.csv"), delim = ",", show_col_types = F) %>% 
@@ -85,12 +103,17 @@ if (method_type == 'cftlmr') {
   if (length(cc_files) > 0) {
     # Process complete cases files
     complete_cases_summarised_data <- process_files_in_batches(input_path = input_dims, pattern = "complete_cases_instruments_dims\\.csv$", batch_size = 500)
-    
+
+    if (!"n_clumped_cis_snps" %in% colnames(complete_cases_summarised_data)) {
+      complete_cases_summarised_data$n_clumped_cis_snps <- NA_real_
+    }
+
     complete_cases_summarised_data <- complete_cases_summarised_data %>%
       dplyr::group_by(Exposure) %>%
       dplyr::summarise(
         cc_n_gwas_snps = mean(n_gwas_snps, na.rm = TRUE),
-        cc_n_clumped_snps = mean(n_clumped_snps, na.rm = TRUE))
+        cc_n_clumped_snps = mean(n_clumped_snps, na.rm = TRUE),
+        cc_n_clumped_cis_snps = summarise_count(n_clumped_cis_snps))
     
     # Join complete cases stats to summarised_data
     summarised_data <- summarised_data %>%

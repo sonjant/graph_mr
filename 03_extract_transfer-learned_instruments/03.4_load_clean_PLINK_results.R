@@ -82,6 +82,60 @@ empty_instruments <- function() {
              stringsAsFactors = FALSE)
 }
 
+# Linear results are *.glm.linear. Logistic results are *.glm.logistic,
+# *.glm.logistic.hybrid (PLINK default, Firth fallback), or *.glm.firth.
+# One chromosome can have a leftover linear file after a logistic rerun;
+# keep the logistic/Firth file when both exist.
+glm_result_files <- function(path) {
+  candidates <- list.files(path = path,
+                           pattern = "PHENO1\\.glm\\.(linear|logistic|firth)",
+                           full.names = TRUE,
+                           recursive = TRUE)
+  if (length(candidates) == 0) {
+    return(candidates)
+  }
+  preference <- function(candidate) {
+    name <- basename(candidate)
+    if (grepl("glm\\.logistic\\.hybrid", name)) {
+      1
+    } else if (grepl("glm\\.logistic", name)) {
+      2
+    } else if (grepl("glm\\.firth", name)) {
+      3
+    } else {
+      4
+    }
+  }
+  chromosome <- sub("\\.PHENO1\\.glm\\..*$", "", basename(candidates))
+  keep <- tapply(seq_along(candidates), chromosome, function(idx) {
+    idx[[which.min(vapply(candidates[idx], preference, numeric(1)))]]
+  })
+  candidates[sort(unlist(keep, use.names = FALSE))]
+}
+
+# Logistic output reports the log-odds as BETA when cols=+beta is set, and
+# names the standard error LOG(OR)_SE when an odds ratio is also reported.
+# Scores downstream still use BETA, which is the log-odds coefficient.
+read_glm_results <- function(path) {
+  header <- names(fread(path, nrows = 0))
+  chrom_col <- if ("#CHROM" %in% header) "#CHROM" else "CHROM"
+  se_col <- if ("SE" %in% header) "SE" else "LOG(OR)_SE"
+  beta_from_or <- !("BETA" %in% header)
+  beta_col <- if (beta_from_or) "OR" else "BETA"
+  needed <- c("ID", chrom_col, "POS", beta_col, se_col, "P", "REF", "ALT")
+  missing_cols <- setdiff(needed, header)
+  if (length(missing_cols) > 0) {
+    stop("GLM file is missing columns: ", paste(missing_cols, collapse = ", "), " (", path, ")")
+  }
+  result <- fread(path,
+                  select = needed,
+                  col.names = c("ID", "CHROM", "POS", "BETA", "SE", "P", "REF", "ALT"))
+  if (beta_from_or) {
+    result[, BETA := log(as.numeric(BETA))]
+  }
+  result
+}
+
 # Keep clumped SNPs inside the protein cis window.
 filter_to_cis <- function(clumped_snps, cis_window) {
   clumped_snps %>%
@@ -111,14 +165,17 @@ save_gwas <- function(input_list){
     has_cis_coords <- is_protein && nrow(cis_window) == 1
     # Create output directory
     dir.create(paste0(output, input_name), showWarnings = F, recursive = T)
-    # List, read, and bind the 22 GWAS result files for the current exposure
-    gwas_res_filelist <- list.files(path = input_i, pattern = "*glm.linear", full.names = T, recursive = T)
-    gwas_res <- rbindlist(l = lapply(gwas_res_filelist, fread, 
-                                     select = c("ID", "#CHROM", "POS", "BETA", "SE", "P", "REF", "ALT"),
-                                     col.names = c("ID", "CHROM", "POS", "BETA", "SE", "P", "REF", "ALT")), 
-                          use.names = T, fill = T) 
-    # Filter out rows where the column "ID" contains the value "ID"
-    gwas_res <- gwas_res[gwas_res$ID != "ID", ]
+    # List, read, and bind the 22 GWAS result files for the current exposure.
+    # A missing file (for example a skipped constant binary exposure) leaves an empty table.
+    gwas_res_filelist <- glm_result_files(input_i)
+    if (length(gwas_res_filelist) == 0) {
+      gwas_res <- empty_instruments()
+    } else {
+      gwas_res <- rbindlist(l = lapply(gwas_res_filelist, read_glm_results),
+                            use.names = T, fill = T)
+      # Filter out rows where the column "ID" contains the value "ID"
+      gwas_res <- gwas_res[gwas_res$ID != "ID", ]
+    }
     n_gwas_snps <- nrow(gwas_res)
 
     # If GWAS result is empty, keep an empty instrument table.

@@ -51,12 +51,54 @@ input_pval_unadjusted <- remove_second_and_later_duplicates(input_pval_unadjuste
 input_fstat_adjusted <- remove_second_and_later_duplicates(input_fstat_adjusted)
 input_pval_adjusted <- remove_second_and_later_duplicates(input_pval_adjusted)
 
+# Keep F-statistic rows and columns that share a name, in the same order, so diag() is the self-effect
+align_fstat_rows_and_columns <- function(df) {
+  row_names <- as.character(df[[1]])
+  col_names <- as.character(colnames(df)[-1])
+  if (anyDuplicated(row_names) > 0 || anyDuplicated(col_names) > 0) {
+    stop("F-statistic matrix has duplicate exposure names; cannot align rows and columns.")
+  }
+  shared <- intersect(row_names, col_names)
+  if (length(shared) == 0) {
+    stop("F-statistic matrix has no exposure names shared by rows and columns.")
+  }
+  dropped_rows <- setdiff(row_names, shared)
+  dropped_cols <- setdiff(col_names, shared)
+  if (length(dropped_rows) == 0 && length(dropped_cols) == 0 && identical(row_names, col_names)) {
+    writeLines(paste0("F-statistic rows and columns already match (", length(shared), " exposures)."))
+    return(df)
+  }
+  if (length(dropped_rows) > 0) {
+    writeLines(c(
+      paste0("Removing ", length(dropped_rows), " F-statistic row(s) with no matching column:"),
+      paste(dropped_rows, collapse = ", ")
+    ))
+  }
+  if (length(dropped_cols) > 0) {
+    writeLines(c(
+      paste0("Removing ", length(dropped_cols), " F-statistic column(s) with no matching row:"),
+      paste(dropped_cols, collapse = ", ")
+    ))
+  }
+  row_keep <- match(shared, row_names)
+  col_keep <- c(1L, match(shared, col_names) + 1L)
+  df <- df[row_keep, col_keep, drop = FALSE]
+  if (!identical(as.character(df[[1]]), colnames(df)[-1])) {
+    stop("F-statistic matrix rows and columns are not in identical order after alignment.")
+  }
+  if (length(dropped_rows) == 0 && length(dropped_cols) == 0) {
+    writeLines("Reordered F-statistic columns to match row order.")
+  }
+  df
+}
+
 # Start script ----
 writeLines(c(" ", " ", "Started script 07.1 - Format data for graphs.", " ", " "))
 
 # Create TL-CFMR adjacency matrix where exposure-GSes have F-statistic > 10 and Bonferroni-significant P-values for total-effects)
 create_adjmatrix <- function(input_fstat, input_pval, suffix = "") {
   # Filter for instruments with F-statistic > 10
+  input_fstat <- align_fstat_rows_and_columns(input_fstat)
   fstat.matrix.data <- input_fstat[, -1]
   fstat.matrix.data <- as.matrix(fstat.matrix.data)
   fstat.matrix.data <- diag(fstat.matrix.data)

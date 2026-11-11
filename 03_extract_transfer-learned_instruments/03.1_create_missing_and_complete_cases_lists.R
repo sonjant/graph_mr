@@ -39,12 +39,16 @@ create_exposure_dfs <- function(input_df) {
     # Extract and format each exposure for running a GWAS  
     exposure_data <- input_df %>%
       mutate(fullbarcode = barcode) %>% 
-      dplyr::select(barcode, fullbarcode, exposure_name) 
+      dplyr::select(barcode, fullbarcode, all_of(exposure_name)) 
     # Remove rows with NAs
     exposure_data_no_na <- exposure_data %>% 
       filter(!is.na(.[[exposure_name]]))
-    # Standardise exposure data
-    exposure_data_no_na[, 3] <- scale(exposure_data_no_na[, 3])
+    # Standardise continuous exposures; leave binary (0/1) exposures unchanged
+    unique_vals <- unique(exposure_data_no_na[[exposure_name]])
+    is_binary <- length(unique_vals) > 0 && all(unique_vals %in% c(0, 1))
+    if (!is_binary) {
+      exposure_data_no_na[, 3] <- scale(exposure_data_no_na[, 3])
+    }
     # Create list of participants with missing data for the current exposure
     exposure_data_only_na <- exposure_data %>% 
       filter(is.na(.[[exposure_name]])) %>% 

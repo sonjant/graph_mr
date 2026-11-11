@@ -45,16 +45,28 @@ for i in $(seq 1 $N); do
         mkdir -p "${output}${exposure}/fold${n}"
 
         parallel '
-            plink2 \
-              --bfile '"${input}"'cleaned_chr{1} \
-              --clump '"${output}${exposure}/fold${n}/chr{1}"'.PHENO1.glm.linear \
-              --clump-kb 250 \
-              --clump-p1 5e-8 \
-              --clump-p2 0.01 \
-              --clump-r2 0.001 \
-              --clump-snp-field ID \
-              --out '"${output}${exposure}/fold${n}/chr{1}"'.clumped \
-            && rm -f '"${output}${exposure}/fold${n}/chr{1}"'.clumped.nosex 2>/dev/null || true
+            glm_file=""
+            for suffix in glm.logistic.hybrid glm.logistic glm.firth glm.linear; do
+                candidate="'"${output}${exposure}/fold${n}/chr{1}.PHENO1."'${suffix}"
+                if [ -f "$candidate" ]; then
+                    glm_file="$candidate"
+                    break
+                fi
+            done
+            if [ -z "$glm_file" ]; then
+                echo "No GLM result for '"${exposure}"' fold '"${n}"' chromosome {1}" >&2
+            else
+                plink2 \
+                  --bfile '"${input}"'cleaned_chr{1} \
+                  --clump "$glm_file" \
+                  --clump-kb 250 \
+                  --clump-p1 5e-8 \
+                  --clump-p2 0.01 \
+                  --clump-r2 0.001 \
+                  --clump-snp-field ID \
+                  --out '"${output}${exposure}/fold${n}/chr{1}"'.clumped \
+                && rm -f '"${output}${exposure}/fold${n}/chr{1}"'.clumped.nosex 2>/dev/null || true
+            fi
         ' ::: {1..22}
     done
 
